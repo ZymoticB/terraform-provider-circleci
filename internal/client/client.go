@@ -182,6 +182,19 @@ func (c *Client) FollowProject(vcsType, account, repo string) (*Project, error) 
 	return project, nil
 }
 
+// UnfollowProject unfollows a project
+func (c *Client) UnfollowProject(vcsType, account, repo string) (*Project, error) {
+
+	project := &Project{}
+
+	err := c.request("POST", fmt.Sprintf("project/%s/%s/%s/unfollow", vcsType, account, repo), project, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return project, nil
+}
+
 // GetProject retrieves a specific project
 // Returns nil of the project is not in the list of watched projects
 func (c *Client) GetProject(account, repo string) (*Project, error) {
