@@ -300,3 +300,13 @@ type CheckoutKey struct {
 	Preferred   bool      `json:"preferred"`
 	Time        time.Time `json:"time"` // time key was created
 }
+
+type Settings struct {
+	SSHKeys []SSHKey `json:"ssh_keys"`
+}
+
+type SSHKey struct {
+	Hostname    string `json:"hostname"`
+	PublicKey   string `json:"public_key"`
+	Fingerprint string `json:"fingerprint"`
+}

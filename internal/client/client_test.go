@@ -13,33 +13,20 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	// mux is the HTTP request multiplexer used with the test server.
-	mux *http.ServeMux
-
-	// client is the CircleCI client being tested.
-	client *Client
-
-	// server is a test HTTP server used to provide mock API responses.
-	server *httptest.Server
-)
-
 const _fakeCCIToken = "fake-cci-token"
 
-func setup() {
-	mux = http.NewServeMux()
-	server = httptest.NewServer(mux)
+func setup() (*http.ServeMux, *httptest.Server, *Client, func()) {
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
 
 	url, err := url.Parse(server.URL)
 	if err != nil {
 		panic(fmt.Sprintf("couldn't parse test server URL: %s", server.URL))
 	}
 
-	client = NewClient(zap.NewNop(), _fakeCCIToken, http.DefaultClient, WithBaseURL(url))
-}
+	client := NewClient(zap.NewNop(), _fakeCCIToken, http.DefaultClient, WithBaseURL(url))
 
-func teardown() {
-	defer server.Close()
+	return mux, server, client, func() { server.Close() }
 }
 
 func testBody(t *testing.T, r *http.Request, want string) {
@@ -87,8 +74,9 @@ func testHeader(t *testing.T, r *http.Request, header string, want string) {
 }
 
 func TestClient_request(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testHeader(t, r, "Accept", "application/json")
@@ -104,8 +92,9 @@ func TestClient_request(t *testing.T) {
 }
 
 func TestClient_request_unauthenticated(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -117,8 +106,9 @@ func TestClient_request_unauthenticated(t *testing.T) {
 }
 
 func TestClient_request_noErrorMessage(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -129,8 +119,9 @@ func TestClient_request_noErrorMessage(t *testing.T) {
 }
 
 func TestClient_Me(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"login": "jszwedko"}`)
@@ -148,8 +139,9 @@ func TestClient_Me(t *testing.T) {
 }
 
 func TestClient_ListProjects(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[{"reponame": "foo"}]`)
@@ -167,8 +159,9 @@ func TestClient_ListProjects(t *testing.T) {
 }
 
 func TestClient_EnableProject(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/vcsType/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 	})
@@ -180,8 +173,9 @@ func TestClient_EnableProject(t *testing.T) {
 }
 
 func TestClient_DisableProject(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/org-name/repo-name/enable", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 	})
@@ -193,8 +187,9 @@ func TestClient_DisableProject(t *testing.T) {
 }
 
 func TestClient_FollowProject(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/vcsType/org-name/repo-name/follow", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"reponame": "repo-name"}`)
@@ -212,8 +207,9 @@ func TestClient_FollowProject(t *testing.T) {
 }
 
 func TestClient_GetProject(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[
@@ -235,8 +231,8 @@ func TestClient_GetProject(t *testing.T) {
 }
 
 func TestClient_GetProject_noMatching(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 	mux.HandleFunc("/projects", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[
@@ -255,8 +251,8 @@ func TestClient_GetProject_noMatching(t *testing.T) {
 }
 
 func TestClient_recentBuilds_multiPage(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	requestCount := 0
 	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
@@ -288,8 +284,8 @@ func TestClient_recentBuilds_multiPage(t *testing.T) {
 }
 
 func TestClient_recentBuilds_multiPageExhausted(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
@@ -309,8 +305,8 @@ func TestClient_recentBuilds_multiPageExhausted(t *testing.T) {
 }
 
 func TestClient_recentBuilds_multiPageNoLimit(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	requestCount := 0
 	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
@@ -342,8 +338,8 @@ func TestClient_recentBuilds_multiPageNoLimit(t *testing.T) {
 }
 
 func TestClient_ListRecentBuilds(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 	mux.HandleFunc("/recent-builds", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "offset", "2")
@@ -363,8 +359,9 @@ func TestClient_ListRecentBuilds(t *testing.T) {
 }
 
 func TestClient_ListRecentBuildsForProject(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/foo/bar/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "filter", "running")
@@ -387,8 +384,9 @@ func TestClient_ListRecentBuildsForProject(t *testing.T) {
 }
 
 func TestClient_ListRecentBuildsForProject_noBranch(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/foo/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testQueryIncludes(t, r, "filter", "running")
@@ -411,8 +409,9 @@ func TestClient_ListRecentBuildsForProject_noBranch(t *testing.T) {
 }
 
 func TestClient_GetBuild(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/123", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"build_num": 123}`)
@@ -430,8 +429,9 @@ func TestClient_GetBuild(t *testing.T) {
 }
 
 func TestClient_ListBuildArtifacts(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/123/artifacts", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `[{"Path": "/some/path"}]`)
@@ -449,8 +449,9 @@ func TestClient_ListBuildArtifacts(t *testing.T) {
 }
 
 func TestClient_ListTestMetadata(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/123/tests", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprint(w, `{"tests": [{"name": "some test"}]}`)
@@ -468,8 +469,9 @@ func TestClient_ListTestMetadata(t *testing.T) {
 }
 
 func TestClient_Build(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/tree/master", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
@@ -487,8 +489,9 @@ func TestClient_Build(t *testing.T) {
 }
 
 func TestClient_RetryBuild(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/123/retry", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 124}`)
@@ -506,8 +509,9 @@ func TestClient_RetryBuild(t *testing.T) {
 }
 
 func TestClient_CancelBuild(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/123/cancel", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		fmt.Fprint(w, `{"build_num": 123}`)
@@ -525,8 +529,9 @@ func TestClient_CancelBuild(t *testing.T) {
 }
 
 func TestClient_ClearCache(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/build-cache", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 		fmt.Fprint(w, `{"status": "cache cleared"}`)
@@ -544,8 +549,9 @@ func TestClient_ClearCache(t *testing.T) {
 }
 
 func TestClient_AddEnvVar_validName(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"name":"bar","value":"baz"}`)
@@ -563,9 +569,10 @@ func TestClient_AddEnvVar_validName(t *testing.T) {
 	}
 }
 func TestClient_AddEnvVar_invalidName(t *testing.T) {
+	_, _, client, shutdown := setup()
+	defer shutdown()
+
 	expectedError := "environment variable name is not valid"
-	setup()
-	defer teardown()
 
 	_, err := client.AddEnvVar("myVcs", "jszwedko", "foo", "--invalid--", "baz")
 
@@ -579,8 +586,9 @@ func TestClient_AddEnvVar_invalidName(t *testing.T) {
 }
 
 func TestClient_ListEnvVars(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/envvar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testBody(t, r, "")
@@ -602,8 +610,9 @@ func TestClient_ListEnvVars(t *testing.T) {
 }
 
 func TestClient_GetEnvVAR_present(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/envvar/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testBody(t, r, "")
@@ -623,8 +632,9 @@ func TestClient_GetEnvVAR_present(t *testing.T) {
 }
 
 func TestClient_GetEnvVAR_absent(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/envvar/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		testBody(t, r, "")
@@ -645,8 +655,9 @@ func TestClient_GetEnvVAR_absent(t *testing.T) {
 }
 
 func TestClient_DeleteEnvVar(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/envvar/bar", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
 		w.WriteHeader(http.StatusNoContent)
@@ -659,8 +670,9 @@ func TestClient_DeleteEnvVar(t *testing.T) {
 }
 
 func TestClient_AddSSHKey(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/ssh-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
 		testBody(t, r, `{"hostname":"example.com","private_key":"some-key"}`)
@@ -673,9 +685,81 @@ func TestClient_AddSSHKey(t *testing.T) {
 	}
 }
 
+func TestClient_DeleteSSHKey(t *testing.T) {
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
+	mux.HandleFunc("/project/myVcs/jszwedko/foo/ssh-key", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "DELETE")
+		testBody(t, r, `{"hostname":"example.com","fingerprint":"DE:AD:BE:EF"}`)
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	err := client.DeleteSSHKey("myVcs", "jszwedko", "foo", "example.com", "DE:AD:BE:EF")
+	if err != nil {
+		t.Errorf("DeleteSSHKey unexpectedly failed: %v", err)
+	}
+}
+
+func TestClient_GetSettings_success(t *testing.T) {
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
+	mux.HandleFunc("/project/myVcs/account/repo/settings", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "GET")
+		w.Write([]byte(
+			`{
+	"ssh_keys": [
+		{
+			"hostname": "test.hostname",
+			"public_key": "ssh-rsa this is a public key",
+			"fingerprint": "DE:AD:BE:EF"
+		}
+	]
+}`))
+	})
+
+	settings, err := client.GetSettings("myVcs", "account", "repo")
+	if err != nil {
+		t.Errorf("GetSettings returned error: %v", err)
+	}
+
+	expect := &Settings{
+		SSHKeys: []SSHKey{
+			{
+				Hostname:    "test.hostname",
+				PublicKey:   "ssh-rsa this is a public key",
+				Fingerprint: "DE:AD:BE:EF",
+			},
+		},
+	}
+
+	if !reflect.DeepEqual(expect, settings) {
+		t.Errorf("GetSettings expected %+v, actual %+v", expect, settings)
+	}
+}
+
+func TestClient_GetSettings_failure(t *testing.T) {
+	mux, _, client, shutdown := setup()
+	defer shutdown()
+
+	mux.HandleFunc("/project/myVcs/account/repo/settings", func(w http.ResponseWriter, r *http.Request) {
+		testMethod(t, r, "GET")
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	_, err := client.GetSettings("myVcs", "account", "repo")
+	expectErr := &APIError{HTTPStatusCode: http.StatusInternalServerError}
+
+	if !reflect.DeepEqual(expectErr, err) {
+		t.Errorf("Expected err %+v got %+v", expectErr, err)
+	}
+}
+
 func TestClient_GetActionOutput(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, server, client, shutdown := setup()
+	defer shutdown()
+
 	mux.HandleFunc("/some-s3-path", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
 		fmt.Fprintf(w, `[{"Message":"hello"}, {"Message": "world"}]`)
@@ -695,8 +779,8 @@ func TestClient_GetActionOutput(t *testing.T) {
 }
 
 func TestClient_GetActionOutput_noOutput(t *testing.T) {
-	setup()
-	defer teardown()
+	_, _, client, shutdown := setup()
+	defer shutdown()
 
 	action := &Action{HasOutput: false}
 
@@ -711,8 +795,8 @@ func TestClient_GetActionOutput_noOutput(t *testing.T) {
 }
 
 func TestClient_ListCheckoutKeys(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/project/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
@@ -743,8 +827,8 @@ func TestClient_ListCheckoutKeys(t *testing.T) {
 }
 
 func TestClient_CreateCheckoutKey(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/checkout-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
@@ -777,8 +861,8 @@ func TestClient_CreateCheckoutKey(t *testing.T) {
 }
 
 func TestClient_GetCheckoutKey(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "GET")
@@ -809,8 +893,8 @@ func TestClient_GetCheckoutKey(t *testing.T) {
 }
 
 func TestClient_DeleteCheckoutKey(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/project/myVcs/jszwedko/foo/checkout-key/37:27:f7:68:85:43:46:d2:e1:30:83:8f:f7:1b:ad:c2", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "DELETE")
@@ -824,8 +908,8 @@ func TestClient_DeleteCheckoutKey(t *testing.T) {
 }
 
 func TestClient_AddSSHUser(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/project/jszwedko/foo/123/ssh-users", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
@@ -844,8 +928,8 @@ func TestClient_AddSSHUser(t *testing.T) {
 }
 
 func TestClient_AddHerokuKey(t *testing.T) {
-	setup()
-	defer teardown()
+	mux, _, client, shutdown := setup()
+	defer shutdown()
 
 	mux.HandleFunc("/user/heroku-key", func(w http.ResponseWriter, r *http.Request) {
 		testMethod(t, r, "POST")
